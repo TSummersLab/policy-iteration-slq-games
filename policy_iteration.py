@@ -136,11 +136,11 @@ if __name__ == "__main__":
                   [0.4, 1.0],
                   [0.6, 0.4]])
 
-    npr.seed(2)
-    A = npr.rand(5, 5).round(1)
-    A = A*(0.9/specrad(A))
-    B = npr.rand(5, 3).round(1)
-    C = npr.rand(5, 2).round(1)
+    # npr.seed(6)
+    # A = npr.randn(5, 5).round(1)
+    # A = A*(0.9/specrad(A))
+    # B = npr.rand(5, 3).round(1)
+    # C = npr.rand(5, 2).round(1)
 
     n = A.shape[1]
     m = B.shape[1]
@@ -148,7 +148,7 @@ if __name__ == "__main__":
 
     Q = np.eye(n)
     R = np.eye(m)
-    S = 4*np.eye(p)
+    S = 3*np.eye(p)
 
     # Initial gains
     K0 = np.zeros([m, n])
