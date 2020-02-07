@@ -19,7 +19,7 @@ def policy_iteration(A, B, C, Q, R, S, K0=None, L0=None, num_iterations=100):
     if L0 is None:
         L0 = np.zeros([p, n])
     K = np.copy(K0)
-    L = np.copy(K0)
+    L = np.copy(L0)
 
     # Check initial policies are stabilizing
     if specrad(A+B.dot(K0)+C.dot(L0)) > 1:
@@ -51,13 +51,11 @@ def policy_iteration(A, B, C, Q, R, S, K0=None, L0=None, num_iterations=100):
         Qvu = Quv.T
         Qvv = -S + mdot(C.T, P, C)
 
-        QuuQvvinv = solveb(Quu, Qvv)
+        QuvQvvinv = solveb(Quv, Qvv)
         QvuQuuinv = solveb(Qvu, Quu)
 
-        K = -la.solve(Quu-QuuQvvinv.dot(Qvu), Qux-QuuQvvinv.dot(Qvx))
+        K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
         L = -la.solve(Qvv-QvuQuuinv.dot(Quv), Qvx-QvuQuuinv.dot(Qux))
-
-
 
     return P, K, L, P_history, K_history, L_history, c_history
 
@@ -91,29 +89,58 @@ def value_iteration(A, B, C, Q, R, S, P0=None, num_iterations=100):
         QuuQuvQvuQvv = np.block([[Quu, Quv], [Qvu, Qvv]])
         P = Q + mdot(A.T, P, A) - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv))
 
-
     # Policy synthesis
-    QuuQvvinv = solveb(Quu, Qvv)
+    QuvQvvinv = solveb(Quv, Qvv)
     QvuQuuinv = solveb(Qvu, Quu)
-    K = -la.solve(Quu-QuuQvvinv.dot(Qvu), Qux-QuuQvvinv.dot(Qvx))
+    K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
     L = -la.solve(Qvv-QvuQuuinv.dot(Quv), Qvx-QvuQuuinv.dot(Qux))
     return P, K, L, P_history, c_history
 
 
-if __name__ == "__main__":
+def verify_gare(A, B, C, Q, R, S, P, algo_str=None):
+    # Verify that the GARE is solved by the solution P
 
+    if algo_str is None:
+        algo_str = ''
+
+    Qux = mdot(B.T, P, A)
+    Qvx = mdot(C.T, P, A)
+    Quu = R + mdot(B.T, P, B)
+    Quv = mdot(B.T, P, C)
+    Qvu = Quv.T
+    Qvv = -S + mdot(C.T, P, C)
+
+    QxuQxv = np.vstack([Qux, Qvx])
+    QuuQuvQvuQvv = np.block([[Quu, Quv], [Qvu, Qvv]])
+
+    print(algo_str)
+    print('-'*len(algo_str))
+    print('Left-hand side of the GARE')
+    print(P)
+    print('')
+    print('Right-hand side of the GARE')
+    print(Q + mdot(A.T, P, A) - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv)))
+    print('\n')
+    return
+
+
+if __name__ == "__main__":
     # Problem data
     A = np.array([[0.7, 0.2, 0],
                   [0.3, 0.5, 0.2],
                   [0.2, 0.4, 0.3]])
-
     B = np.array([[1.0, 0.0],
                   [0.0, 1.0],
                   [0.2, 0.6]])
-
     C = np.array([[1.0, 0.3],
                   [0.4, 1.0],
                   [0.6, 0.4]])
+
+    npr.seed(2)
+    A = npr.rand(5, 5).round(1)
+    A = A*(0.9/specrad(A))
+    B = npr.rand(5, 3).round(1)
+    C = npr.rand(5, 2).round(1)
 
     n = A.shape[1]
     m = B.shape[1]
@@ -121,80 +148,44 @@ if __name__ == "__main__":
 
     Q = np.eye(n)
     R = np.eye(m)
-    S = 5*np.eye(p)
+    S = 4*np.eye(p)
 
+    # Initial gains
     K0 = np.zeros([m, n])
     L0 = np.zeros([p, n])
 
-    # Policy iteration
+    Pare, Kare = dare_gain(A, B, Q, R)
+    K0 = Kare
+
+    AKL0 = A + B.dot(K0) + C.dot(L0)
+    QKL0 = Q + mdot(K0.T, R, K0) - mdot(L0.T, S, L0)
+    P0 = dlyap(AKL0.T, QKL0)
+
+    # Settings
     num_iterations = 20
     t_history = np.arange(num_iterations)+1
 
-    P, K, L, P_history, K_history, L_history, c_history = policy_iteration(A, B, C, Q, R, S, K0, L0, num_iterations)
-
-    # Verify that the GARE is solved by the solution
-    Qux = mdot(B.T, P, A)
-    Qvx = mdot(C.T, P, A)
-    Quu = R + mdot(B.T, P, B)
-    Quv = mdot(B.T, P, C)
-    Qvu = Quv.T
-    Qvv = -S + mdot(C.T, P, C)
-
-    QxuQxv = np.vstack([Qux, Qvx])
-    QuuQuvQvuQvv = np.block([[Quu, Quv], [Qvu, Qvv]])
-
-    print('Policy iteration')
-    print('----------------')
-    print('Right-hand side of the GARE')
-    print(P)
-    print('')
-    print('Left-hand side of the GARE')
-    print(Q + mdot(A.T, P, A) - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv)))
-    print('\n')
-
-    # Plotting
-    plt.close('all')
-    plt.plot(t_history, c_history)
-    plt.xlabel('Iteration')
-    plt.ylabel('Cost')
-
-
+    # Policy iteration
+    P_pi, K_pi, L_pi, P_history_pi, K_history_pi, L_history_pi, c_history_pi = policy_iteration(A, B, C, Q, R, S, K0, L0, num_iterations)
+    verify_gare(A, B, C, Q, R, S, P_pi, algo_str='Policy iteration')
 
     # Value iteration
     # Start value iteration at the same initial P as from policy iteration
-    K = K0
-    L = L0
-    AKL = A + B.dot(K) + C.dot(L)
-    QKL = Q + mdot(K.T, R, K) - mdot(L.T, S, L)
-    P0 = dlyap(AKL.T, QKL)
-
-    P, K, L, P_history, c_history = value_iteration(A, B, C, Q, R, S, P0, num_iterations)
-
-    # Verify that the GARE is solved by the solution
-    Qux = mdot(B.T, P, A)
-    Qvx = mdot(C.T, P, A)
-    Quu = R + mdot(B.T, P, B)
-    Quv = mdot(B.T, P, C)
-    Qvu = Quv.T
-    Qvv = -S + mdot(C.T, P, C)
-
-    QxuQxv = np.vstack([Qux, Qvx])
-    QuuQuvQvuQvv = np.block([[Quu, Quv], [Qvu, Qvv]])
-
-    print('Value iteration')
-    print('---------------')
-    print('Right-hand side of the GARE')
-    print(P)
-    print('')
-    print('Left-hand side of the GARE')
-    print(Q + mdot(A.T, P, A) - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv)))
-    print('\n')
-
+    P_vi, K_vi, L_vi, P_history_vi, c_history_vi = value_iteration(A, B, C, Q, R, S, P0, num_iterations)
+    verify_gare(A, B, C, Q, R, S, P_vi, algo_str='Value iteration')
 
     # Plotting
-    plt.plot(t_history, c_history)
+    plt.close('all')
+    fig, ax = plt.subplots()
+    plt.plot(t_history, c_history_pi)
+    plt.plot(t_history, c_history_vi)
     plt.xlabel('Iteration')
     plt.ylabel('Cost')
-
     plt.legend(['Policy iteration', 'Value iteration'])
-    plt.xticks(np.arange(num_iterations)+1)
+    if num_iterations <= 20:
+        plt.xticks(np.arange(num_iterations)+1)
+
+    # Specific stuff for Ben's monitor
+    fig.canvas.manager.window.setGeometry(3600, 600, 800, 600)
+    fig.canvas.manager.window.showMaximized()
+    plt.show()
