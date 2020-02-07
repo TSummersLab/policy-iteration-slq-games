@@ -176,12 +176,29 @@ if __name__ == "__main__":
 
     # Plotting
     plt.close('all')
+
+    # Cost-to-go matrix
+    fig, ax = plt.subplots(ncols=2)
+    plt.suptitle('Value matrix (P)')
+    ax[0].imshow(P_pi)
+    ax[1].imshow(P_vi)
+    # ax[0].set_title('ARE')
+    ax[0].set_title('Policy iteration')
+    ax[1].set_title('Value iteration')
+    # Specific stuff for Ben's monitor
+    fig.canvas.manager.window.setGeometry(3600, 600, 800, 600)
+    fig.canvas.manager.window.showMaximized()
+    plt.show()
+
+    # Cost over iterations
     fig, ax = plt.subplots()
-    plt.plot(t_history, c_history_pi)
-    plt.plot(t_history, c_history_vi)
+    # ax.plot(np.ones(num_iterations)*np.trace(Pare), 'r--')
+    ax.plot(t_history, c_history_pi)
+    ax.plot(t_history, c_history_vi)
+    # plt.legend(['ARE', 'Policy iteration', 'Value iteration'])
+    plt.legend(['Policy iteration', 'Value iteration'])
     plt.xlabel('Iteration')
     plt.ylabel('Cost')
-    plt.legend(['Policy iteration', 'Value iteration'])
     if num_iterations <= 20:
         plt.xticks(np.arange(num_iterations)+1)
 
