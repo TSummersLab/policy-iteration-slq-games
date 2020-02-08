@@ -307,11 +307,16 @@ def verify_gare(problem_data, P, algo_str=None):
 
     print(algo_str)
     print('-'*len(algo_str))
-    print('Left-hand side of the GARE')
-    print(P)
+    LHS = P
+    RHS = Qxx - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv))
+    print('Left-hand side of the GARE: Positive definite = %s' % is_pos_def(LHS))
+    print(LHS)
     print('')
-    print('Right-hand side of the GARE')
-    print(Qxx - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv)))
+    print('Right-hand side of the GARE: Positive definite = %s' % is_pos_def(RHS))
+    print(RHS)
+    print('')
+    print('Difference')
+    print(LHS-RHS)
     print('\n')
     return
 
