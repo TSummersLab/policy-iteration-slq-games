@@ -4,273 +4,252 @@ import numpy.random as npr
 import scipy.linalg as sla
 import matplotlib.pyplot as plt
 
+from ltimult_lqm import gdlyap
+
 import sys
 sys.path.insert(0,'../utility')
 from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, sympart, kron, mdot
 
-import warnings
-from warnings import warn
 
-
-def gdlyap(problem_data, K, L, matrixtype='P', algo='linsolve', show_warn=False, check_pd=False, P00=None, S00=None):
+def groupdot(A, x):
     """
-    Solve a discrete-time generalized Lyapunov equation
-    for stochastic linear systems with multiplicative noise.
+    Perform dot product over groups of matrices,
+    suitable for performing many LTI state transitions in a vectorized fashion
     """
+    return np.einsum('...ik,...k', A, x)
 
+
+def groupquadform(A, x):
+    """
+    Perform quadratic form over many vectors stacked in matrix x with respect to cost matrix A
+    Equivalent to np.array([mdot(x[i].T, A, x[i]) for i in range(x.shape[0])])
+    """
+    return np.sum(np.dot(x, A)*x, axis=1)
+
+
+def sample_ABCrand(problem_data):
+    problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk']
+    A, B, C, Ai, Bj, Ck, varAi, varBj, varCk = [problem_data[key] for key in problem_data_keys]
+    q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
+    Arand = A + np.sum([npr.randn()*(varAi[i]**0.5)*Ai[i] for i in range(q)], axis=0)
+    Brand = B + np.sum([npr.randn()*(varBj[j]**0.5)*Bj[j] for j in range(r)], axis=0)
+    Crand = C + np.sum([npr.randn()*(varCk[k]**0.5)*Ck[k] for k in range(s)], axis=0)
+    return Arand, Brand, Crand
+
+
+def sample_ABCrand_multi(problem_data, nt, nr):
+    problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk']
+    A, B, C, Ai, Bj, Ck, varAi, varBj, varCk = [problem_data[key] for key in problem_data_keys]
+    q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
+
+    # Sample scalar random variables
+    a = npr.randn(nt, nr, q)*(varAi**0.5)
+    b = npr.randn(nt, nr, r)*(varBj**0.5)
+    c = npr.randn(nt, nr, s)*(varCk**0.5)
+
+    # Generate Arand etc. such that Arand[i, j] == A + np.sum([a[i, j][k]*Ai[k] for k in range(q)], axis=0)
+    Arand_all = A + np.moveaxis(np.einsum('ijk,k...', a, Ai), [-2, -1], [0, 1])
+    Brand_all = B + np.moveaxis(np.einsum('ijk,k...', b, Bj), [-2, -1], [0, 1])
+    Crand_all = C + np.moveaxis(np.einsum('ijk,k...', c, Ck), [-2, -1], [0, 1])
+
+    return Arand_all, Brand_all, Crand_all
+
+
+def rollout(problem_data, K, L, sim_options):
+    """Simulate closed-loop state response"""
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
+    n, m, p = [M.shape[1] for M in [A, B, C]]
 
-    n = A.shape[1]
-    m = B.shape[1]
-    p = C.shape[1]
-    q = Ai.shape[0]
-    r = Bj.shape[0]
-    s = Ck.shape[0]
+    sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option']
+    xstd, ustd, vstd, wstd, nt, nr, group_option = [sim_options[key] for key in sim_options_keys]
 
-    AKL = A + np.dot(B, K) + np.dot(C, L)
+    # First step
+    # Sample initial states, defender control inputs, and attacker control inputs
+    x0, u0, v0 = [npr.randn(nr, dim)*std for dim, std in zip([n, m, p], [xstd, ustd, vstd])]
 
-    stable = True
-    if algo=='linsolve':
-        if matrixtype=='P':
-            # Intermediate terms
-            Aunc_P = np.sum([varAi[i]*kron(Ai[i].T) for i in range(q)], axis=0)
-            BKunc_P = np.sum([varBj[j]*kron(np.dot(K.T, Bj[j].T)) for j in range(r)], axis=0)
-            CLunc_P = np.sum([varCk[k]*kron(np.dot(L.T, Ck[k].T)) for k in range(s)], axis=0)
+    Qval = np.zeros(nr)
 
-            # Compute matrix and vector for the linear equation solver
-            Alin_P = np.eye(n*n) - (kron(AKL.T) + Aunc_P + BKunc_P + CLunc_P)
-            blin_P = vec(Q) + np.dot(kron(K.T), vec(R)) - np.dot(kron(L.T), vec(S))
-            # Solve linear equations
-            xlin_P = la.solve(Alin_P, blin_P)
-            # Reshape
-            P = np.reshape(xlin_P, [n, n])
-            if check_pd:
-                stable = is_pos_def(P)
-        # elif matrixtype=='S':
-        #     # Intermediate terms
-        #     Aunc_S = np.zeros([n*n,n*n])
-        #     for i in range(q):
-        #         Aunc_S = Aunc_S + a[i]*kron(Ai[i])
-        #     BKunc_S = np.zeros([n*n,n*n])
-        #     for j in range(r):
-        #         BKunc_S = BKunc_S + b[j]*kron(np.dot(Bj[j],K))
-        #     # Compute matrix and vector for the linear equation solver
-        #     Alin_S = np.eye(n*n) - kron(AK) - Aunc_S - BKunc_S
-        #     blin_S = vec(S0)
-        #     # Solve linear equations
-        #     xlin_S = la.solve(Alin_S, blin_S)
-        #     # Reshape
-        #     S = np.reshape(xlin_S, [n, n])
-        #     if check_pd:
-        #         stable = is_pos_def(S)
-        # elif matrixtype=='PS':
-        #     P = gdlyap(problem_data, K, L, matrixtype='P', algo='linsolve')
-        #     S = gdlyap(problem_data, K, L, matrixtype='S', algo='linsolve')
-#     elif algo=='iterative':
-#         # Implicit iterative solution to generalized discrete Lyapunov equation
-#         # Inspired by https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=7553367
-#         # In turn inspired by https://pdf.sciencedirectassets.com/271503/1-s2.0-S0898122100X0020X/1-s2.0-089812219500119J/main.pdf?x-amz-security-token=AgoJb3JpZ2luX2VjECgaCXVzLWVhc3QtMSJIMEYCIQD#2F00Re8b3wnBnFpZQrjkOeXrNI4bYZ1J6#2F9BcJptZYAAIhAOQjTsZX573uFFEr7QveHx4NaZYWxlZfRN6hr5h1GJWWKuMDCOD#2F#2F#2F#2F#2F#2F#2F#2F#2F#2FwEQAhoMMDU5MDAzNTQ2ODY1IgxqkGe6i8wGmEj6YAwqtwNDKbotYDExP2D6PO8MrlIKYmHCtJhTu1CXLv0N5NKsYT90H2rJTNU0MvqsUsnXtbn6C9t9ed31XTf#2BHc7KrGmpOils7zgrjV1QG4LP0Fu2OcT4#2F#2FOGLWNvVjWY9gOLEHSeG5LhvBbxJiZVrI#2Bm1QAIVz5dxH5DVB27A2e9OmRrswrpPWuxQV#2BUvLkz2dVM4qSkvaDA#2F3KEJk9s0XE74mjO4ZHX7d9Q2aYwxsvFbII6Hms#2FZmB6125tBTwzd0K5xDit5kaoiYadOetp3M#2FvCdaiO0QeQwkV4#2FUaprOIIQGwJaMJuMNe7xInQxF#2B#2FmER81JhWEpBHBmz#2F5p0d2tU7F2oTDc2OR#2BV5dTKab47zgUw648fDT7ays0TQzqTMGnGcX9wIQpxSCam2E8Bhg6tsEs0#2FudddgnsiId368q70xai6ucMfabMSCqnv7O0OZqPVwY5b7qk4mxKIehpIzV6rrtXSAGrH95WGlgGz#2Fhmg9Qq6AUtb8NSqyYw0uZ00E#2FPZmNTnI3nwxjOA5qhyEbw3uXogRwYrv0dLkd50s7oO3mlYFeJDBurhx11t9p94dFqQq7sDY70m#2F4xMNCcmuUFOrMBY1JZuqtQ7QFBVbgzV#2B4xSHV6#2FyD#2F4ezttczZY3eSASJpdC4rjYHXcliiE7KOBHivchFZMIYeF3J4Nvn6UykX5sNfRANC2BDPrgoCQUp95IE5kgYGB8iEISlp40ahVXK62GhEASJxMjJTI9cJ2M#2Ff#2BJkwmqAGjTsBwjxkgiLlHc63rBAEJ2e7xoTwDDql3FSSYcvKzwioLfet#2FvXWvjPzz44tB3#2BTvYamM0uq47XPlUFcTrw#3D&AWSAccessKeyId=ASIAQ3PHCVTYWXNG3EKG&Expires=1554423148&Signature=Ysi80usGGEjPCvw#2BENTSD90NgVs#3D&hash=e5cf30dad62b0b57d7b7f5ba524cccacdbb36d2f747746e7fbebb7717b415820&host=68042c943591013ac2b2430a89b270f6af2c76d8dfd086a07176afe7c76c2c61&pii=089812219500119J&tid=spdf-a9dae0e9-65fd-4f31-bf3f-e0952eb4176c&sid=5c8c88eb95ed9742632ae57532a4a6e1c6b1gxrqa&type=client
-#         # Faster for large systems i.e. >50 states
-#         # Options
-#         max_iters = 1000
-#         epsilon_P = 1e-5
-#         epsilon_S = 1e-5
-#         # Initialize
-#         if matrixtype=='P' or matrixtype=='PS':
-#             if P00 is None:
-#                 P = np.zeros([n,n])
-#             else:
-#                 P = P00
-#         if matrixtype=='S' or matrixtype=='PS':
-#             if S00 is None:
-#                 S = np.zeros([n,n])
-#             else:
-#                 S = S00
-#         iterc = 0
-#         converged = False
-#         stop = False
-#         while not stop:
-#             if matrixtype=='P' or matrixtype=='PS':
-#                 P_prev = P
-#                 APAunc = np.zeros([n,n])
-#                 for i in range(q):
-#                     APAunc += a[i]*mdot(Ai[i].T,P,Ai[i])
-#                 BPBunc = np.zeros([n,n])
-#                 for j in range(r):
-#                     BPBunc += b[j]*mdot(K.T,Bj[j].T,P,Bj[j],K)
-#                 AAP = AK.T
-#                 QQP = sympart(Q + mdot(K.T,R,K) + APAunc + BPBunc)
-#                 P = dlyap(AAP,QQP)
-#                 if np.any(np.isnan(P)) or not is_pos_def(P):
-#                     stable = False
-#                 converged_P = la.norm(P-P_prev,2)/la.norm(P,2) < epsilon_P
-#             if matrixtype=='S' or matrixtype=='PS':
-#                 S_prev = S
-#                 ASAunc = np.zeros([n,n])
-#                 for i in range(q):
-#                     ASAunc += a[i]*mdot(Ai[i],S,Ai[i].T)
-#                 BSBunc = np.zeros([n,n])
-#                 for j in range(r):
-#                     BSBunc = b[j]*mdot(Bj[j],K,S,K.T,Bj[j].T)
-#                 AAS = AK
-#                 QQS = sympart(S0 + ASAunc + BSBunc)
-#                 S = dlyap(AAS,QQS)
-#                 if np.any(np.isnan(S)) or not is_pos_def(S):
-#                     stable = False
-#                 converged_S = la.norm(S-S_prev,2)/la.norm(S,2) < epsilon_S
-#             # Check for stopping condition
-#             if matrixtype=='P':
-#                 converged = converged_P
-#             elif matrixtype=='S':
-#                 converged = converged_S
-#             elif matrixtype=='PS':
-#                 converged = converged_P and converged_S
-#             if iterc >= max_iters:
-#                 stable = False
-#             else:
-#                 iterc += 1
-#             stop = converged or not stable
-# #        print('\ndlyap iters = %s' % str(iterc))
-#
-#     elif algo=='finite_horizon':
-#         P = np.copy(Q)
-#         Pt = np.copy(Q)
-#         S = np.copy(Q)
-#         St = np.copy(Q)
-#         converged = False
-#         stop = False
-#         while not stop:
-#             if matrixtype=='P' or matrixtype=='PS':
-#                 APAunc = np.zeros([n,n])
-#                 for i in range(q):
-#                     APAunc += a[i]*mdot(Ai[i].T,Pt,Ai[i])
-#                 BPBunc = np.zeros([n,n])
-#                 for j in range(r):
-#                     BPBunc += b[j]*mdot(K.T,Bj[j].T,Pt,Bj[j],K)
-#                 Pt = mdot(AK.T,Pt,AK)+APAunc+BPBunc
-#                 P += Pt
-#                 converged_P = np.abs(Pt).sum() < 1e-15
-#                 stable = np.abs(P).sum() < 1e10
-#             if matrixtype=='S' or matrixtype=='PS':
-#                 ASAunc = np.zeros([n,n])
-#                 for i in range(q):
-#                     ASAunc += a[i]*mdot(Ai[i],St,Ai[i].T)
-#                 BSBunc = np.zeros([n,n])
-#                 for j in range(r):
-#                     BSBunc = b[j]*mdot(Bj[j],K,St,K.T,Bj[j].T)
-#                 St = mdot(AK,Pt,AK.T)+ASAunc+BSBunc
-#                 S += St
-#                 converged_S = np.abs(St).sum() < 1e-15
-#                 stable = np.abs(S).sum() < 1e10
-#             if matrixtype=='P':
-#                 converged = converged_P
-#             elif matrixtype=='S':
-#                 converged = converged_S
-#             elif matrixtype=='PS':
-#                 converged = converged_P and converged_S
-#             stop = converged or not stable
-    if not stable:
-        P = None
-        S = None
-        if show_warn:
-            warnings.simplefilter('always', UserWarning)
-            warn('System is possibly not mean-square stable')
-    if matrixtype=='P':
-        return P
-    elif matrixtype=='S':
-        return S
-    elif matrixtype=='PS':
-        return P, S
+    if group_option == 'single':
+        # Iterate over rollouts
+        for k in range(nr):
+            x0_k, u0_k, v0_k = [var[k] for var in [x0, u0, v0]]
+
+            # Initialize
+            x = np.copy(x0_k)
+
+            # Iterate over timesteps
+            for i in range(nt):
+                # Compute controls
+                if i == 0:
+                    u, v = np.copy(u0_k), np.copy(v0_k)
+                else:
+                    u, v = np.dot(K, x), np.dot(L, x)
+
+                # Accumulate cost
+                Qval[k] += mdot(x.T, Q, x) + mdot(u.T, R, u) - mdot(v.T, S, v)
+
+                # Randomly sample state transition matrices using multiplicative noise
+                Arand, Brand, Crand = sample_ABCrand(problem_data)
+
+                # Additive noise
+                w = npr.randn(n)*wstd
+
+                # Transition the state using multiplicative and additive noise
+                x = np.dot(Arand, x) + np.dot(Brand, u) + np.dot(Crand, v) + w
 
 
-def qfun(problem_data, P, outputs_needed=None):
-    if outputs_needed is None:
-        outputs_needed = 'xuv_matrix'
+    elif group_option == 'group':
+        # Randomly sample state transition matrices using multiplicative noise
+        Arand_all, Brand_all, Crand_all = sample_ABCrand_multi(problem_data, nt, nr)
+
+        # Randomly sample additive noise
+        w_all = npr.randn(nt, nr, n)*wstd
+
+        # Initialize
+        x = np.copy(x0)
+
+        # Iterate over timesteps
+        for i in range(nt):
+            # Compute controls
+            if i == 0:
+                u = np.copy(u0)
+                v = np.copy(v0)
+            else:
+                u = groupdot(K, x)
+                v = groupdot(L, x)
+
+            # Accumulate cost
+            Qval += groupquadform(Q, x) + groupquadform(R, u) - groupquadform(S, v)
+
+            # Look up stochastic dynamics and additive noise
+            Arand, Brand, Crand = Arand_all[i], Brand_all[i], Crand_all[i]
+            w = w_all[i]
+
+            # Transition the state using multiplicative and additive noise
+            x = groupdot(Arand, x) + groupdot(Brand, u) + groupdot(Crand, v) + w
+
+    return x0, u0, v0, Qval
+
+
+def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_options=None, output_format=None):
+    """Compute or estimate Q-function matrix"""
+    if problem_data_known is None:
+        problem_data_known = True
+    if output_format is None:
+        output_format = 'list'
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
+    n, m, p = [M.shape[1] for M in [A, B, C]]
 
-    if outputs_needed == 'xuv_list' or outputs_needed == 'xuv_matrix':
+    if P is None:
+        P = gdlyap(problem_data, K, L)
+
+    if problem_data_known:
         APAi = np.sum([varAi[i]*mdot(Ai[i].T, P, Ai[i]) for i in range(q)], axis=0)
-    BPBj = np.sum([varBj[j]*mdot(Bj[j].T, P, Bj[j]) for j in range(r)], axis=0)
-    CPCk = np.sum([varCk[k]*mdot(Ck[k].T, P, Ck[k]) for k in range(s)], axis=0)
+        BPBj = np.sum([varBj[j]*mdot(Bj[j].T, P, Bj[j]) for j in range(r)], axis=0)
+        CPCk = np.sum([varCk[k]*mdot(Ck[k].T, P, Ck[k]) for k in range(s)], axis=0)
 
-    if outputs_needed == 'uv_list' or outputs_needed == 'xuv_list':
+        Qxx = Q + mdot(A.T, P, A) + APAi
+        Quu = R + mdot(B.T, P, B) + BPBj
+        Qvv = -S + mdot(C.T, P, C) + CPCk
         Qux = mdot(B.T, P, A)
         Qvx = mdot(C.T, P, A)
-        Quu = R + mdot(B.T, P, B) + BPBj
-        Quv = mdot(B.T, P, C)
-        Qvu = Quv.T
-        Qvv = -S + mdot(C.T, P, C) + CPCk
-        if outputs_needed == 'uv_list':
-            outputs = Qux, Qvx, Quu, Quv, Qvu, Qvv
-        elif outputs_needed == 'xuv_list':
-            Qxx = Q + mdot(A.T, P, A) + APAi
-            outputs = Qxx, Qux, Qvx, Quu, Quv, Qvu, Qvv
-    elif outputs_needed == 'xuv_matrix':
-        ABC = np.hstack([A, B, C])
-        X = sla.block_diag(Q, R, -S)
-        Y = mdot(ABC.T, P, ABC)
-        Z = sla.block_diag(APAi, BPBj, CPCk)
-        outputs = X + Y + Z
+        Qvu = mdot(C.T, P, B)
+    else:
+        nr = sim_options['nr']
+
+        # Simulation data collection
+        x0, u0, v0, Qval = rollout(problem_data, K, L, sim_options)
+
+        # Dimensions
+        Qpart_shapes = [[n, n], [m, m], [p, p], [m, n], [p, n], [p, m]]
+        Qvec_part_lengths = [np.prod(shape) for shape in Qpart_shapes]
+
+        # Least squares estimation
+        xuv_data = np.zeros([nr, np.sum(Qvec_part_lengths)])
+        for i in range(nr):
+            x = x0[i]
+            u = u0[i]
+            v = v0[i]
+            xuv_data[i] = np.hstack([kron(x.T, x.T), kron(u.T, u.T), kron(v.T, v.T),
+                                     2*kron(x.T, u.T), 2*kron(x.T, v.T), 2*kron(u.T, v.T)])
+
+        # Solve the least squares problem
+        Qvec = la.lstsq(xuv_data, Qval, rcond=None)[0]
+
+        # Split and reshape the solution vector into the appropriate matrices
+        idxi = [0]
+        Qvec_parts = []
+        Q_parts = []
+        for i, part_length in enumerate(Qvec_part_lengths):
+            idxi.append(idxi[i] + part_length)
+            Qvec_parts.append(Qvec[idxi[i]:idxi[i+1]])
+            Q_parts.append(np.reshape(Qvec_parts[i], Qpart_shapes[i]))
+
+        Qxx, Quu, Qvv, Qux, Qvx, Qvu = Q_parts
+
+    if output_format == 'list':
+        outputs = Qxx, Quu, Qvv, Qux, Qvx, Qvu
+    elif output_format == 'matrix':
+        outputs = np.block([[Qxx, Qux.T, Qvx.T],
+                            [Qux, Quu, Qvu.T],
+                            [Qvx, Qvu, Qvv]])
+        # ABC = np.hstack([A, B, C])
+        # X = sla.block_diag(Q, R, -S)
+        # Y = mdot(ABC.T, P, ABC)
+        # Z = sla.block_diag(APAi, BPBj, CPCk)
+        # outputs = X + Y + Z
     return outputs
 
 
-def policy_iteration(problem_data, K0=None, L0=None, num_iterations=100):
-    # Policy iteration
+def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None, num_iterations=100):
+    """Policy iteration"""
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
-
-    n = A.shape[1]
-    m = B.shape[1]
-    p = C.shape[1]
-
-    if K0 is None:
-        K0 = np.zeros([m, n])
-    if L0 is None:
-        L0 = np.zeros([p, n])
-    K = np.copy(K0)
-    L = np.copy(L0)
+    n, m, p = [M.shape[1] for M in [A, B, C]]
+    K, L = np.copy(K0), np.copy(L0)
 
     # Check initial policies are stabilizing
-    if specrad(A+B.dot(K0)+C.dot(L0)) > 1:
+    if specrad(A + B.dot(K0) + C.dot(L0)) > 1:
         raise Exception("Initial policies are not stabilizing!")
 
-    P_history = np.zeros([num_iterations, n, n])
-    K_history = np.zeros([num_iterations, m, n])
-    L_history = np.zeros([num_iterations, p, n])
+    P_history, K_history, L_history = [np.zeros([num_iterations, dim, n]) for dim in [n, m , p]]
     c_history = np.zeros(num_iterations)
 
+    print('Policy iteration')
     for i in range(num_iterations):
+        print('iteration %3d / %3d' % (i+1, num_iterations))
+        # Record history
+        K_history[i] = K
+        L_history[i] = L
+
         # Policy evaluation
         P = gdlyap(problem_data, K, L)
+        Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, problem_data_known, P, K, L, sim_options)
+        QuvQvvinv = solveb(Qvu.T, Qvv)
+        QvuQuuinv = solveb(Qvu, Quu)
+
+        # Policy improvement
+        K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
+        L = -la.solve(Qvv-QvuQuuinv.dot(Qvu.T), Qvx-QvuQuuinv.dot(Qux))
 
         # Record history
         P_history[i] = P
-        K_history[i] = K
-        L_history[i] = L
         c_history[i] = np.trace(P)
-
-        # Policy improvement
-        Qux, Qvx, Quu, Quv, Qvu, Qvv = qfun(problem_data, P, outputs_needed='uv_list')
-        QuvQvvinv = solveb(Quv, Qvv)
-        QvuQuuinv = solveb(Qvu, Quu)
-        K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
-        L = -la.solve(Qvv-QvuQuuinv.dot(Quv), Qvx-QvuQuuinv.dot(Qux))
-
+    print('')
     return P, K, L, P_history, K_history, L_history, c_history
 
 
 def value_iteration(problem_data, P0=None, num_iterations=100):
-    # Value iteration
+    """Value iteration"""
+    # Only the case of known dynamics is supported
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
-    n = A.shape[1]
-    m = B.shape[1]
-    p = C.shape[1]
+    n, m, p = [M.shape[1] for M in [A, B, C]]
 
     if P0 is None:
-        P0 = np.eye(n)
+        P0 = np.copy(Q)
     P = np.copy(P0)
 
     P_history = np.zeros([num_iterations, n, n])
@@ -282,34 +261,36 @@ def value_iteration(problem_data, P0=None, num_iterations=100):
         c_history[i] = np.trace(P)
 
         # Value improvement
-        Qxx, Qux, Qvx, Quu, Quv, Qvu, Qvv = qfun(problem_data, P, outputs_needed='xuv_list')
+        Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, P=P)
         QxuQxv = np.vstack([Qux, Qvx])
-        QuuQuvQvuQvv = np.block([[Quu, Quv], [Qvu, Qvv]])
+        QuuQuvQvuQvv = np.block([[Quu, Qvu.T],
+                                 [Qvu, Qvv]])
         P = Qxx - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv))
 
     # Policy synthesis
-    QuvQvvinv = solveb(Quv, Qvv)
+    QuvQvvinv = solveb(Qvu.T, Qvv)
     QvuQuuinv = solveb(Qvu, Quu)
     K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
-    L = -la.solve(Qvv-QvuQuuinv.dot(Quv), Qvx-QvuQuuinv.dot(Qux))
+    L = -la.solve(Qvv-QvuQuuinv.dot(Qvu.T), Qvx-QvuQuuinv.dot(Qux))
 
     return P, K, L, P_history, c_history
 
 
 def verify_gare(problem_data, P, algo_str=None):
-    # Verify that the GARE is solved by the solution P
+    """Verify that the GARE is solved by the solution P"""
     if algo_str is None:
         algo_str = ''
 
-    Qxx, Qux, Qvx, Quu, Quv, Qvu, Qvv = qfun(problem_data, P, outputs_needed='xuv_list')
+    Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, P=P)
     QxuQxv = np.vstack([Qux, Qvx])
-    QuuQuvQvuQvv = np.block([[Quu, Quv], [Qvu, Qvv]])
+    QuuQuvQvuQvv = np.block([[Quu, Qvu.T],
+                             [Qvu, Qvv]])
 
     print(algo_str)
     print('-'*len(algo_str))
     LHS = P
     RHS = Qxx - np.dot(QxuQxv.T, la.solve(QuuQuvQvuQvv, QxuQxv))
-    print('Left-hand side of the GARE: Positive definite = %s' % is_pos_def(LHS))
+    print(' Left-hand side of the GARE: Positive definite = %s' % is_pos_def(LHS))
     print(LHS)
     print('')
     print('Right-hand side of the GARE: Positive definite = %s' % is_pos_def(RHS))
@@ -321,32 +302,32 @@ def verify_gare(problem_data, P, algo_str=None):
     return
 
 
-if __name__ == "__main__":
+def get_problem_data(problem_type, problem_data_id=None, seed=None):
+    """Get problem data"""
     from time import time
     from data_io import save_problem_data, load_problem_data
     from problem_data_gen import gen_rand_problem_data
 
-    # Problem data
-    problem_data_id = 1581199445 # 5-state random system
-    # problem_data_id = 1581200195 # 3-state example system
-    problem_data = load_problem_data(problem_data_id)
+    if problem_type == 'load':
+        problem_data = load_problem_data(problem_data_id)
+    elif problem_type == 'gen':
+        problem_data = gen_rand_problem_data(n=2, m=1, p=1, rho=0.9, seed=seed)
+        problem_data_id = int(time())
+        save_problem_data(problem_data_id, problem_data)
 
-    # problem_data = gen_rand_problem_data(rho=0.9, seed=1)
-    # problem_data_id = int(time())
-    # save_problem_data(problem_data_id, problem_data)
+    return problem_data
 
+
+def get_initial_gains(problem_data, initial_gain_method=None):
+    """Get initial gains"""
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
-    n = A.shape[1]
-    m = B.shape[1]
-    p = C.shape[1]
-    q = Ai.shape[0]
-    r = Bj.shape[0]
-    s = Ck.shape[0]
+    n, m, p = [M.shape[1] for M in [A, B, C]]
 
-    # Initial gains
-    initial_gain_method = 'zero'
-    # initial_gain_method = 'dare'
+
+    if initial_gain_method is None:
+        initial_gain_method = 'zero'
+
     if initial_gain_method == 'zero':
         K0 = np.zeros([m, n])
         L0 = np.zeros([p, n])
@@ -355,32 +336,101 @@ if __name__ == "__main__":
         K0 = Kare
         L0 = np.zeros([p, n])
 
-    AKL0 = A + B.dot(K0) + C.dot(L0)
-    QKL0 = Q + mdot(K0.T, R, K0) - mdot(L0.T, S, L0)
-    P0 = gdlyap(problem_data, K0, L0)
+    return K0, L0
 
-    # Settings
+
+def get_sim_options():
+    """Get simulation options for rollouts"""
+    # Std deviation for initial state, defender inputs, attacker inputs, and additive noise
+    xstd, ustd, vstd, wstd = 1.0, 1.0, 1.0, 0.0
+
+    # Rollout length
+    nt = 20
+
+    # Number of rollouts
+    nr = 10000
+
+    group_option = 'group'
+
+    sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option']
+    sim_options_values = [xstd, ustd, vstd, wstd, nt, nr, group_option]
+    sim_options = dict(zip(sim_options_keys, sim_options_values))
+    return sim_options
+
+
+def compare_qfun():
+    """Compare single Q-function evaluation in cases of known and unknown dynamics"""
+    Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, problem_data_known=False, K=K0, L=L0, sim_options=sim_options)
+    Q_parts = [Qxx, Quu, Qvv, Qux, Qvx, Qvu]
+
+    # Calculate error
+    Q_part_strings = ['Qxx', 'Quu', 'Qvv', 'Qux', 'Qvx', 'Qvu']
+
+    Q_parts_true = qfun(problem_data, problem_data_known=True, K=K0, L=L0)
+    for Q_part, Q_part_true, Q_part_string in zip(Q_parts, Q_parts_true, Q_part_strings):
+        print(Q_part_string)
+        print('true')
+        print(Q_part_true)
+        print('est')
+        print(Q_part)
+        print('diff')
+        print(Q_part-Q_part_true)
+        print('\n')
+
+    QuvQvvinv = solveb(Qvu.T, Qvv)
+    QvuQuuinv = solveb(Qvu, Quu)
+    K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
+    L = -la.solve(Qvv-QvuQuuinv.dot(Qvu.T), Qvx-QvuQuuinv.dot(Qux))
+    return
+
+
+if __name__ == "__main__":
+    seed = 1
+    npr.seed(seed)
+
+    # problem_data_id = 1581199445 # 5-state random system
+    problem_data_id = 1581378883 # 2-state example system
+    # problem_data_id = 3 # 3-state example system
+    # problem_data_id = 2 # 2-state example system
+    problem_data = get_problem_data(problem_type='load', problem_data_id=problem_data_id)
+    problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
+    A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
+    n, m, p = [M.shape[1] for M in [A, B, C]]
+    q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
+
+    # Modify problem data, make disturbances less strong
+    # varAi *= 0.1
+    # varBj *= 0.1
+    # varCk *= 0.1
+    # S *= 10
+
+    # Initial gains
+    K0, L0 = get_initial_gains(problem_data, initial_gain_method='zero')
+
+    # Simulation options
+    sim_options = get_sim_options()
     num_iterations = 20
-    t_history = np.arange(num_iterations)+1
 
     # Policy iteration
-    P_pi, K_pi, L_pi, P_history_pi, K_history_pi, L_history_pi, c_history_pi = policy_iteration(problem_data, K0, L0, num_iterations)
+    problem_data_known = False
+    P_pi, K_pi, L_pi, P_history_pi, K_history_pi, L_history_pi, c_history_pi = policy_iteration(problem_data, problem_data_known, K0, L0, sim_options, num_iterations)
     verify_gare(problem_data, P_pi, algo_str='Policy iteration')
 
     # Value iteration
     # Start value iteration at the same initial P as from policy iteration
+    P0 = gdlyap(problem_data, K0, L0)
     P_vi, K_vi, L_vi, P_history_vi, c_history_vi = value_iteration(problem_data, P0, num_iterations)
     verify_gare(problem_data, P_vi, algo_str='Value iteration')
 
     # Plotting
     plt.close('all')
+    t_history = np.arange(num_iterations)+1
 
     # Cost-to-go matrix
     fig, ax = plt.subplots(ncols=2)
     plt.suptitle('Value matrix (P)')
     ax[0].imshow(P_pi)
     ax[1].imshow(P_vi)
-    # ax[0].set_title('ARE')
     ax[0].set_title('Policy iteration')
     ax[1].set_title('Value iteration')
     # Specific stuff for Ben's monitor
@@ -390,10 +440,8 @@ if __name__ == "__main__":
 
     # Cost over iterations
     fig, ax = plt.subplots()
-    # ax.plot(np.ones(num_iterations)*np.trace(Pare), 'r--')
     ax.plot(t_history, c_history_pi)
     ax.plot(t_history, c_history_vi)
-    # plt.legend(['ARE', 'Policy iteration', 'Value iteration'])
     plt.legend(['Policy iteration', 'Value iteration'])
     plt.xlabel('Iteration')
     plt.ylabel('Cost')
