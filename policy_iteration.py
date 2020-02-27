@@ -8,7 +8,7 @@ from ltimult_lqm import gdlyap
 
 import sys
 sys.path.insert(0,'../utility')
-from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, smat, sympart, kron, mdot
+from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, svec2, smat, smat2, sympart, kron, mdot
 
 
 def groupdot(A, x):
@@ -283,8 +283,10 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
                     zK = np.concatenate([x_hist[i, j], np.dot(K, x_hist[i, j]), np.dot(L, x_hist[i, j])])
                     zz = np.outer(z, z)
                     zzK = np.outer(zK, zK)
-                    phi_hist[i, j] = svec(zz + np.triu(zz, 1))
-                    phiK_hist[i, j] = svec(zzK + np.triu(zzK, 1))
+                    # phi_hist[i, j] = svec(zz + np.triu(zz, 1))
+                    # phiK_hist[i, j] = svec(zzK + np.triu(zzK, 1))
+                    phi_hist[i, j] = svec2(zz)
+                    phiK_hist[i, j] = svec2(zzK)
 
             Y = np.zeros(ns)
             Z = np.zeros([ns, nz])
@@ -295,8 +297,10 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
                 Z[lwr:upr] = phi_hist[i, 0:-1] - phiK_hist[i, 1:]
 
             # Solve the least squares problem
-            H_svec = la.lstsq(Z, Y, rcond=None)[0]
-            H = smat(H_svec)
+            # H_svec = la.lstsq(Z, Y, rcond=None)[0]
+            # H = smat(H_svec)
+            H_svec2 = la.lstsq(Z, Y, rcond=None)[0]
+            H = smat2(H_svec2)
 
             Qxx = H[0:n, 0:n]
             Quu = H[n:n+m, n:n+m]
