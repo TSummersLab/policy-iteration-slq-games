@@ -8,7 +8,7 @@ from ltimult_lqm import gdlyap
 
 import sys
 sys.path.insert(0,'../utility')
-from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, sympart, kron, mdot
+from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, smat, sympart, kron, mdot
 
 
 def groupdot(A, x):
@@ -64,72 +64,149 @@ def rollout(problem_data, K, L, sim_options):
     sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option']
     xstd, ustd, vstd, wstd, nt, nr, group_option = [sim_options[key] for key in sim_options_keys]
 
-    # First step
-    # Sample initial states, defender control inputs, and attacker control inputs
-    x0, u0, v0 = [npr.randn(nr, dim)*std for dim, std in zip([n, m, p], [xstd, ustd, vstd])]
+    qfun_estimator = sim_options['qfun_estimator']
 
-    Qval = np.zeros(nr)
+    if qfun_estimator == 'direct':
+        # First step
+        # Sample initial states, defender control inputs, and attacker control inputs
+        x0, u0, v0 = [npr.randn(nr, dim)*std for dim, std in zip([n, m, p], [xstd, ustd, vstd])]
 
-    if group_option == 'single':
-        # Iterate over rollouts
-        for k in range(nr):
-            x0_k, u0_k, v0_k = [var[k] for var in [x0, u0, v0]]
+        Qval = np.zeros(nr)
+
+        if group_option == 'single':
+            # Iterate over rollouts
+            for k in range(nr):
+                x0_k, u0_k, v0_k = [var[k] for var in [x0, u0, v0]]
+
+                # Initialize
+                x = np.copy(x0_k)
+
+                # Iterate over timesteps
+                for i in range(nt):
+                    # Compute controls
+                    if i == 0:
+                        u, v = np.copy(u0_k), np.copy(v0_k)
+                    else:
+                        u, v = np.dot(K, x), np.dot(L, x)
+
+                    # Accumulate cost
+                    Qval[k] += mdot(x.T, Q, x) + mdot(u.T, R, u) - mdot(v.T, S, v)
+
+                    # Randomly sample state transition matrices using multiplicative noise
+                    Arand, Brand, Crand = sample_ABCrand(problem_data)
+
+                    # Additive noise
+                    w = npr.randn(n)*wstd
+
+                    # Transition the state using multiplicative and additive noise
+                    x = np.dot(Arand, x) + np.dot(Brand, u) + np.dot(Crand, v) + w
+
+        elif group_option == 'group':
+            # Randomly sample state transition matrices using multiplicative noise
+            Arand_all, Brand_all, Crand_all = sample_ABCrand_multi(problem_data, nt, nr)
+
+            # Randomly sample additive noise
+            w_all = npr.randn(nt, nr, n)*wstd
 
             # Initialize
-            x = np.copy(x0_k)
+            x = np.copy(x0)
 
             # Iterate over timesteps
             for i in range(nt):
                 # Compute controls
                 if i == 0:
-                    u, v = np.copy(u0_k), np.copy(v0_k)
+                    u = np.copy(u0)
+                    v = np.copy(v0)
                 else:
-                    u, v = np.dot(K, x), np.dot(L, x)
+                    u = groupdot(K, x)
+                    v = groupdot(L, x)
 
                 # Accumulate cost
-                Qval[k] += mdot(x.T, Q, x) + mdot(u.T, R, u) - mdot(v.T, S, v)
+                Qval += groupquadform(Q, x) + groupquadform(R, u) - groupquadform(S, v)
 
-                # Randomly sample state transition matrices using multiplicative noise
-                Arand, Brand, Crand = sample_ABCrand(problem_data)
-
-                # Additive noise
-                w = npr.randn(n)*wstd
+                # Look up stochastic dynamics and additive noise
+                Arand, Brand, Crand = Arand_all[i], Brand_all[i], Crand_all[i]
+                w = w_all[i]
 
                 # Transition the state using multiplicative and additive noise
-                x = np.dot(Arand, x) + np.dot(Brand, u) + np.dot(Crand, v) + w
+                x = groupdot(Arand, x) + groupdot(Brand, u) + groupdot(Crand, v) + w
 
+        return x0, u0, v0, Qval
 
-    elif group_option == 'group':
-        # Randomly sample state transition matrices using multiplicative noise
-        Arand_all, Brand_all, Crand_all = sample_ABCrand_multi(problem_data, nt, nr)
+    elif qfun_estimator == 'qlearning':
+        # Sample initial states, defender control inputs, and attacker control inputs
+        x0 = xstd*npr.randn(nr, n)
+        u_explore_hist = ustd*npr.randn(nr, nt, m)
+        v_explore_hist =  vstd*npr.randn(nr, nt, p)
 
-        # Randomly sample additive noise
-        w_all = npr.randn(nt, nr, n)*wstd
+        x_hist = np.zeros([nr, nt, n])
+        u_hist = np.zeros([nr, nt, m])
+        v_hist = np.zeros([nr, nt, p])
+        c_hist = np.zeros([nr, nt])
 
-        # Initialize
-        x = np.copy(x0)
+        if group_option == 'single':
+            # Iterate over rollouts
+            for k in range(nr):
+                # Initialize
+                x = np.copy(x0[k])
 
-        # Iterate over timesteps
-        for i in range(nt):
-            # Compute controls
-            if i == 0:
-                u = np.copy(u0)
-                v = np.copy(v0)
-            else:
-                u = groupdot(K, x)
-                v = groupdot(L, x)
+                # Iterate over timesteps
+                for i in range(nt):
+                    # Compute controls
+                    u = np.dot(K, x) + u_explore_hist[k, i]
+                    v = np.dot(L, x) + v_explore_hist[k, i]
 
-            # Accumulate cost
-            Qval += groupquadform(Q, x) + groupquadform(R, u) - groupquadform(S, v)
+                    # Compute cost
+                    c = mdot(x.T, Q, x) + mdot(u.T, R, u) - mdot(v.T, S, v)
 
-            # Look up stochastic dynamics and additive noise
-            Arand, Brand, Crand = Arand_all[i], Brand_all[i], Crand_all[i]
-            w = w_all[i]
+                    # Record history
+                    x_hist[k, i] = x
+                    u_hist[k, i] = u
+                    v_hist[k, i] = v
+                    c_hist[k, i] = c
 
-            # Transition the state using multiplicative and additive noise
-            x = groupdot(Arand, x) + groupdot(Brand, u) + groupdot(Crand, v) + w
+                    # Randomly sample state transition matrices using multiplicative noise
+                    Arand, Brand, Crand = sample_ABCrand(problem_data)
 
-    return x0, u0, v0, Qval
+                    # Additive noise
+                    w = npr.randn(n)*wstd
+
+                    # Transition the state using multiplicative and additive noise
+                    x = np.dot(Arand, x) + np.dot(Brand, u) + np.dot(Crand, v) + w
+
+        elif group_option == 'group':
+            # Randomly sample state transition matrices using multiplicative noise
+            Arand_all, Brand_all, Crand_all = sample_ABCrand_multi(problem_data, nt, nr)
+
+            # Randomly sample additive noise
+            w_all = npr.randn(nt, nr, n)*wstd
+
+            # Initialize
+            x = np.copy(x0)
+
+            # Iterate over timesteps
+            for i in range(nt):
+                # Compute controls
+                u = groupdot(K, x) + u_explore_hist[:, i]
+                v = groupdot(L, x) + v_explore_hist[:, i]
+
+                # Compute cost
+                c = groupquadform(Q, x) + groupquadform(R, u) - groupquadform(S, v)
+
+                # Record history
+                x_hist[:, i] = x
+                u_hist[:, i] = u
+                v_hist[:, i] = v
+                c_hist[:, i] = c
+
+                # Look up stochastic dynamics and additive noise
+                Arand, Brand, Crand = Arand_all[i], Brand_all[i], Crand_all[i]
+                w = w_all[i]
+
+                # Transition the state using multiplicative and additive noise
+                x = groupdot(Arand, x) + groupdot(Brand, u) + groupdot(Crand, v) + w
+
+        return x_hist, u_hist, v_hist, c_hist
 
 
 def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_options=None, output_format=None):
@@ -158,36 +235,75 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
         Qvu = mdot(C.T, P, B)
     else:
         nr = sim_options['nr']
+        nt = sim_options['nt']
+        qfun_estimator = sim_options['qfun_estimator']
 
-        # Simulation data collection
-        x0, u0, v0, Qval = rollout(problem_data, K, L, sim_options)
+        if qfun_estimator == 'direct':
+            # Simulation data collection
+            x0, u0, v0, Qval = rollout(problem_data, K, L, sim_options)
 
-        # Dimensions
-        Qpart_shapes = [[n, n], [m, m], [p, p], [m, n], [p, n], [p, m]]
-        Qvec_part_lengths = [np.prod(shape) for shape in Qpart_shapes]
+            # Dimensions
+            Qpart_shapes = [[n, n], [m, m], [p, p], [m, n], [p, n], [p, m]]
+            Qvec_part_lengths = [np.prod(shape) for shape in Qpart_shapes]
 
-        # Least squares estimation
-        xuv_data = np.zeros([nr, np.sum(Qvec_part_lengths)])
-        for i in range(nr):
-            x = x0[i]
-            u = u0[i]
-            v = v0[i]
-            xuv_data[i] = np.hstack([kron(x.T, x.T), kron(u.T, u.T), kron(v.T, v.T),
-                                     2*kron(x.T, u.T), 2*kron(x.T, v.T), 2*kron(u.T, v.T)])
+            # Least squares estimation
+            xuv_data = np.zeros([nr, np.sum(Qvec_part_lengths)])
+            for i in range(nr):
+                x = x0[i]
+                u = u0[i]
+                v = v0[i]
+                xuv_data[i] = np.hstack([kron(x.T, x.T), kron(u.T, u.T), kron(v.T, v.T),
+                                         2*kron(x.T, u.T), 2*kron(x.T, v.T), 2*kron(u.T, v.T)])
 
-        # Solve the least squares problem
-        Qvec = la.lstsq(xuv_data, Qval, rcond=None)[0]
+            # Solve the least squares problem
+            Qvec = la.lstsq(xuv_data, Qval, rcond=None)[0]
 
-        # Split and reshape the solution vector into the appropriate matrices
-        idxi = [0]
-        Qvec_parts = []
-        Q_parts = []
-        for i, part_length in enumerate(Qvec_part_lengths):
-            idxi.append(idxi[i] + part_length)
-            Qvec_parts.append(Qvec[idxi[i]:idxi[i+1]])
-            Q_parts.append(np.reshape(Qvec_parts[i], Qpart_shapes[i]))
+            # Split and reshape the solution vector into the appropriate matrices
+            idxi = [0]
+            Qvec_parts = []
+            Q_parts = []
+            for i, part_length in enumerate(Qvec_part_lengths):
+                idxi.append(idxi[i] + part_length)
+                Qvec_parts.append(Qvec[idxi[i]:idxi[i+1]])
+                Q_parts.append(np.reshape(Qvec_parts[i], Qpart_shapes[i]))
 
-        Qxx, Quu, Qvv, Qux, Qvx, Qvu = Q_parts
+            Qxx, Quu, Qvv, Qux, Qvx, Qvu = Q_parts
+
+        elif qfun_estimator == 'qlearning':
+            # Simulation data collection
+            x_hist, u_hist, v_hist, c_hist = rollout(problem_data, K, L, sim_options)
+
+            ns = nr*(nt-1)
+            nz = int(((n+m+p+1)*(n+m+p))/2)
+            phi_hist = np.zeros([nr, nt, nz])
+            phiK_hist = np.zeros([nr, nt, nz])
+            for i in range(nr):
+                for j in range(nt):
+                    z = np.concatenate([x_hist[i, j], u_hist[i, j], v_hist[i, j]])
+                    zK = np.concatenate([x_hist[i, j], np.dot(K, x_hist[i, j]), np.dot(L, x_hist[i, j])])
+                    zz = np.outer(z, z)
+                    zzK = np.outer(zK, zK)
+                    phi_hist[i, j] = svec(zz + np.triu(zz, 1))
+                    phiK_hist[i, j] = svec(zzK + np.triu(zzK, 1))
+
+            Y = np.zeros(ns)
+            Z = np.zeros([ns, nz])
+            for i in range(nr):
+                lwr = i*(nt-1)
+                upr = (i+1)*(nt-1)
+                Y[lwr:upr] = c_hist[i, 0:-1]
+                Z[lwr:upr] = phi_hist[i, 0:-1] - phiK_hist[i, 1:]
+
+            # Solve the least squares problem
+            H_svec = la.lstsq(Z, Y, rcond=None)[0]
+            H = smat(H_svec)
+
+            Qxx = H[0:n, 0:n]
+            Quu = H[n:n+m, n:n+m]
+            Qvv = H[n+m:, n+m:]
+            Qux = H[n:n+m, 0:n]
+            Qvx = H[n+m:, 0:n]
+            Qvu = H[n+m:, n:n+m]
 
     if output_format == 'list':
         outputs = Qxx, Quu, Qvv, Qux, Qvx, Qvu
@@ -348,12 +464,17 @@ def get_sim_options():
     nt = 20
 
     # Number of rollouts
-    nr = 10000
+    nr = 200
 
+    # Rollout computation type
     group_option = 'group'
 
-    sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option']
-    sim_options_values = [xstd, ustd, vstd, wstd, nt, nr, group_option]
+    # Q-function estimation scheme
+    # qfun_estimator = 'direct'
+    qfun_estimator = 'qlearning'
+
+    sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option', 'qfun_estimator']
+    sim_options_values = [xstd, ustd, vstd, wstd, nt, nr, group_option, qfun_estimator]
     sim_options = dict(zip(sim_options_keys, sim_options_values))
     return sim_options
 
@@ -399,10 +520,10 @@ if __name__ == "__main__":
     q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
 
     # Modify problem data, make disturbances less strong
-    # varAi *= 0.1
-    # varBj *= 0.1
-    # varCk *= 0.1
-    # S *= 10
+    varAi *= 0.5
+    varBj *= 0.5
+    varCk *= 0.5
+    S *= 2
 
     # Initial gains
     K0, L0 = get_initial_gains(problem_data, initial_gain_method='zero')
