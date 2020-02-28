@@ -133,7 +133,7 @@ def rollout(problem_data, K, L, sim_options):
 
         return x0, u0, v0, Qval
 
-    elif qfun_estimator == 'qlearning':
+    elif qfun_estimator == 'lsadp' or qfun_estimator == 'lstdq':
         # Sample initial states, defender control inputs, and attacker control inputs
         x0 = xstd*npr.randn(nr, n)
         u_explore_hist = ustd*npr.randn(nr, nt, m)
@@ -269,32 +269,32 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
 
             Qxx, Quu, Qvv, Qux, Qvx, Qvu = Q_parts
 
-        elif qfun_estimator == 'qlearning':
+        elif qfun_estimator == 'lsadp':
             # Simulation data collection
             x_hist, u_hist, v_hist, c_hist = rollout(problem_data, K, L, sim_options)
 
+            # Form the data matrices
             ns = nr*(nt-1)
             nz = int(((n+m+p+1)*(n+m+p))/2)
-            phi_hist = np.zeros([nr, nt, nz])
-            phiK_hist = np.zeros([nr, nt, nz])
+            mu_hist = np.zeros([nr, nt, nz])
+            nu_hist = np.zeros([nr, nt, nz])
+
+            def phi(x):
+                return svec2(np.outer(x, x))
+            
             for i in range(nr):
                 for j in range(nt):
                     z = np.concatenate([x_hist[i, j], u_hist[i, j], v_hist[i, j]])
-                    zK = np.concatenate([x_hist[i, j], np.dot(K, x_hist[i, j]), np.dot(L, x_hist[i, j])])
-                    zz = np.outer(z, z)
-                    zzK = np.outer(zK, zK)
-                    # phi_hist[i, j] = svec(zz + np.triu(zz, 1))
-                    # phiK_hist[i, j] = svec(zzK + np.triu(zzK, 1))
-                    phi_hist[i, j] = svec2(zz)
-                    phiK_hist[i, j] = svec2(zzK)
-
+                    w = np.concatenate([x_hist[i, j], np.dot(K, x_hist[i, j]), np.dot(L, x_hist[i, j])])
+                    mu_hist[i, j] = phi(z)
+                    nu_hist[i, j] = phi(w)
             Y = np.zeros(ns)
             Z = np.zeros([ns, nz])
             for i in range(nr):
                 lwr = i*(nt-1)
                 upr = (i+1)*(nt-1)
                 Y[lwr:upr] = c_hist[i, 0:-1]
-                Z[lwr:upr] = phi_hist[i, 0:-1] - phiK_hist[i, 1:]
+                Z[lwr:upr] = mu_hist[i, 0:-1] - nu_hist[i, 1:]
 
             # Solve the least squares problem
             # H_svec = la.lstsq(Z, Y, rcond=None)[0]
@@ -308,6 +308,46 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
             Qux = H[n:n+m, 0:n]
             Qvx = H[n+m:, 0:n]
             Qvu = H[n+m:, n:n+m]
+
+
+        elif qfun_estimator == 'lstdq':
+            # Simulation data collection
+            x_hist, u_hist, v_hist, c_hist = rollout(problem_data, K, L, sim_options)
+
+            # Form the data matrices
+            nz = int(((n+m+p+1)*(n+m+p))/2)
+            mu_hist = np.zeros([nr, nt, nz])
+            nu_hist = np.zeros([nr, nt, nz])
+
+            def phi(x):
+                return svec2(np.outer(x, x))
+
+            for i in range(nr):
+                for j in range(nt):
+                    z = np.concatenate([x_hist[i, j], u_hist[i, j], v_hist[i, j]])
+                    w = np.concatenate([x_hist[i, j], np.dot(K, x_hist[i, j]), np.dot(L, x_hist[i, j])])
+                    mu_hist[i, j] = phi(z)
+                    nu_hist[i, j] = phi(w)
+
+            Y = np.zeros(nr*nz)
+            Z = np.zeros([nr*nz, nz])
+            for i in range(nr):
+                lwr = i*nz
+                upr = (i+1)*nz
+                for j in range(nt-1):
+                    Y[lwr:upr] += mu_hist[i, j]*c_hist[i, j]
+                    Z[lwr:upr] += np.outer(mu_hist[i, j], mu_hist[i, j] - nu_hist[i, j+1])
+
+            H_svec2 = la.lstsq(Z, Y, rcond=None)[0]
+            H = smat2(H_svec2)
+
+            Qxx = H[0:n, 0:n]
+            Quu = H[n:n+m, n:n+m]
+            Qvv = H[n+m:, n+m:]
+            Qux = H[n:n+m, 0:n]
+            Qvx = H[n+m:, 0:n]
+            Qvu = H[n+m:, n:n+m]
+
 
     if output_format == 'list':
         outputs = Qxx, Quu, Qvv, Qux, Qvx, Qvu
@@ -465,17 +505,18 @@ def get_sim_options():
     xstd, ustd, vstd, wstd = 1.0, 1.0, 1.0, 0.0
 
     # Rollout length
-    nt = 20
+    nt = 2000
 
     # Number of rollouts
-    nr = 200
+    nr = 1
 
     # Rollout computation type
     group_option = 'group'
 
     # Q-function estimation scheme
     # qfun_estimator = 'direct'
-    qfun_estimator = 'qlearning'
+    # qfun_estimator = 'lsadp'
+    qfun_estimator = 'lstdq'
 
     sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option', 'qfun_estimator']
     sim_options_values = [xstd, ustd, vstd, wstd, nt, nr, group_option, qfun_estimator]
@@ -524,10 +565,10 @@ if __name__ == "__main__":
     q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
 
     # Modify problem data, make disturbances less strong
-    varAi *= 0.5
-    varBj *= 0.5
-    varCk *= 0.5
-    S *= 2
+    varAi *= 0.1
+    varBj *= 0.1
+    varCk *= 0.1
+    S *= 5
 
     # Initial gains
     K0, L0 = get_initial_gains(problem_data, initial_gain_method='zero')
