@@ -1,14 +1,13 @@
 import numpy as np
 import numpy.linalg as la
 import numpy.random as npr
-import scipy.linalg as sla
 import matplotlib.pyplot as plt
 
 from ltimult_lqm import gdlyap
 
 import sys
 sys.path.insert(0,'../utility')
-from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, svec2, smat, smat2, sympart, kron, mdot
+from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, svec2, smat, smat2, sympart, kron
 
 
 def groupdot(A, x):
@@ -218,6 +217,7 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
     n, m, p = [M.shape[1] for M in [A, B, C]]
+    q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
 
     if P is None:
         P = gdlyap(problem_data, K, L)
