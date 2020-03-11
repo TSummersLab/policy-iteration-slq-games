@@ -11,7 +11,7 @@ from policy_iteration import policy_iteration, get_initial_gains, get_sim_option
 
 import sys
 sys.path.insert(0,'../utility')
-from matrixmath import mdot, specrad, dlyap, dare_gain, is_pos_def
+from matrixmath import mdot, specrad, dlyap, dare_gain, is_pos_def, kron, vec
 
 
 def model_check(A, B, Q, R, K, op = True, model_type=None):
@@ -90,8 +90,9 @@ def mtpl(A, B, K_pi, Kn_pi, Km_pi, Q, R, init = 1, multiplier_accuracy = 10**(-8
     return mpl
 
 
-if __name__ == "__main__":
-    seed = 2
+
+def robust_stabilization():
+    seed = 1
     npr.seed(seed)
 
     problem_data_true, problem_data = gen_double_spring_mass()
@@ -134,6 +135,12 @@ if __name__ == "__main__":
     if not is_pos_def(-Qvv_pi):
         raise Exception('Problem fails the concavity condition, adjust adversary strength')
 
+    # Check positive definiteness condition
+    QKL_pi = Q + mdot(K_pi.T, R, K_pi) - mdot(L_pi.T, S, L_pi)
+    if not is_pos_def(QKL_pi):
+        raise Exception('Problem fails the positive definiteness condition, adjust adversary strength')
+    print(QKL_pi)
+
     # Policy Iteration on LQR w/ game adversary
     K0n, L0n = get_initial_gains(problem_data_model_n, initial_gain_method='dare')
     print("LQR w/ game adversary")
@@ -173,29 +180,10 @@ if __name__ == "__main__":
         print('%s  %f %8s    %s' % (control_method_string, sr, '%10.2f' % cost, K))
 
 
-    # Plot closed-loop state responses to see how control affects system
-    nt = 1000
-    x_hist = np.zeros([nt, n])
-    x_hist_true = np.zeros([nt, n_true])
-    u_hist = np.zeros([nt, 1])
-    u_hist_true = np.zeros([nt, 1])
-    u_hist[0] = 1
-    u_hist_true[0] = 1
 
-    for i in range(nt-1):
-        if i > 0:
-            u_hist[i] = np.dot(K_pi, x_hist[i])
-            u_hist_true[i] = np.dot(K_pi_true, x_hist_true[i])
 
-        x_hist[i+1] = np.dot(A, x_hist[i]) + np.dot(B, u_hist[i])
-        x_hist_true[i+1] = np.dot(A_true, x_hist_true[i]) + np.dot(B_true, u_hist_true[i])
 
-    plt.close('all')
-    fig, ax = plt.subplots(nrows=2)
-    ax[0].plot(x_hist)
-    ax[1].plot(x_hist_true)
+if __name__ == "__main__":
+    robust_stabilization()
 
-    # Specific stuff for Ben's monitor
-    fig.canvas.manager.window.setGeometry(3600, 600, 800, 600)
-    fig.canvas.manager.window.showMaximized()
-    plt.show()
+    # Paste / type code here while testing new experiments

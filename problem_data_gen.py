@@ -273,7 +273,7 @@ def gen_double_spring_mass():
 
     Q = np.eye(2)
     R = np.eye(1)
-    S = 2.0*np.eye(1)
+    S = 2.1*np.eye(1)
 
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     problem_data_values = [A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S]
