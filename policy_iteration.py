@@ -363,7 +363,8 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
     return outputs
 
 
-def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None, num_iterations=100):
+def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None, num_iterations=100,
+                     print_iterates=True):
     """Policy iteration"""
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
@@ -374,12 +375,17 @@ def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None,
     if specrad(A + B.dot(K0) + C.dot(L0)) > 1:
         raise Exception("Initial policies are not stabilizing!")
 
-    P_history, K_history, L_history = [np.zeros([num_iterations, dim, n]) for dim in [n, m , p]]
+    P_history, K_history, L_history = [np.zeros([num_iterations, dim, n]) for dim in [n, m, p]]
+    H_history = np.zeros([num_iterations, n+m+p, n+m+p])
     c_history = np.zeros(num_iterations)
 
     print('Policy iteration')
     for i in range(num_iterations):
-        print('iteration %3d / %3d' % (i+1, num_iterations))
+        if print_iterates:
+            print('iteration %3d / %3d' % (i+1, num_iterations))
+            print(K)
+            print(L)
+
         # Record history
         K_history[i] = K
         L_history[i] = L
@@ -389,6 +395,9 @@ def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None,
         Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, problem_data_known, P, K, L, sim_options)
         QuvQvvinv = solveb(Qvu.T, Qvv)
         QvuQuuinv = solveb(Qvu, Quu)
+        H = np.block([[Qxx, Qux.T, Qvx.T],
+                      [Qux, Quu, Qvu.T],
+                      [Qvx, Qvu, Qvv]])
 
         # Policy improvement
         K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
@@ -396,9 +405,11 @@ def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None,
 
         # Record history
         P_history[i] = P
+        H_history[i] = H
         c_history[i] = np.trace(P)
+
     print('')
-    return P, K, L, P_history, K_history, L_history, c_history
+    return P, K, L, H, P_history, K_history, L_history, c_history, H_history
 
 
 def value_iteration(problem_data, P0=None, num_iterations=100):
@@ -505,7 +516,7 @@ def get_sim_options():
     xstd, ustd, vstd, wstd = 1.0, 1.0, 1.0, 0.0
 
     # Rollout length
-    nt = 2000
+    nt = 4000
 
     # Number of rollouts
     nr = 1
@@ -564,12 +575,6 @@ if __name__ == "__main__":
     n, m, p = [M.shape[1] for M in [A, B, C]]
     q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
 
-    # Modify problem data, make disturbances less strong
-    varAi *= 0.1
-    varBj *= 0.1
-    varCk *= 0.1
-    S *= 5
-
     # Initial gains
     K0, L0 = get_initial_gains(problem_data, initial_gain_method='zero')
 
@@ -579,7 +584,7 @@ if __name__ == "__main__":
 
     # Policy iteration
     problem_data_known = False
-    P_pi, K_pi, L_pi, P_history_pi, K_history_pi, L_history_pi, c_history_pi = policy_iteration(problem_data, problem_data_known, K0, L0, sim_options, num_iterations)
+    P_pi, K_pi, L_pi, H_pi, P_history_pi, K_history_pi, L_history_pi, c_history_pi, H_history_pi = policy_iteration(problem_data, problem_data_known, K0, L0, sim_options, num_iterations)
     verify_gare(problem_data, P_pi, algo_str='Policy iteration')
 
     # Value iteration
