@@ -1,12 +1,8 @@
 import numpy as np
 import numpy.linalg as la
 import numpy.random as npr
-import matplotlib.pyplot as plt
 
-from ltimult_lqm import gdlyap
-
-import sys
-sys.path.insert(0,'../utility')
+from ltimult import gdlyap
 from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, svec2, smat, smat2, sympart, kron
 
 
@@ -473,22 +469,6 @@ def verify_gare(problem_data, P, algo_str=None):
     return
 
 
-def get_problem_data(problem_type, problem_data_id=None, seed=None):
-    """Get problem data"""
-    from time import time
-    from data_io import save_problem_data, load_problem_data
-    from problem_data_gen import gen_rand_problem_data
-
-    if problem_type == 'load':
-        problem_data = load_problem_data(problem_data_id)
-    elif problem_type == 'gen':
-        problem_data = gen_rand_problem_data(n=2, m=1, p=1, rho=0.9, seed=seed)
-        problem_data_id = int(time())
-        save_problem_data(problem_data_id, problem_data)
-
-    return problem_data
-
-
 def get_initial_gains(problem_data, initial_gain_method=None):
     """Get initial gains"""
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
@@ -510,40 +490,15 @@ def get_initial_gains(problem_data, initial_gain_method=None):
     return K0, L0
 
 
-def get_sim_options():
-    """Get simulation options for rollouts"""
-    # Std deviation for initial state, defender inputs, attacker inputs, and additive noise
-    xstd, ustd, vstd, wstd = 1.0, 1.0, 1.0, 0.0
-
-    # Rollout length
-    nt = 4000
-
-    # Number of rollouts
-    nr = 1
-
-    # Rollout computation type
-    group_option = 'group'
-
-    # Q-function estimation scheme
-    # qfun_estimator = 'direct'
-    # qfun_estimator = 'lsadp'
-    qfun_estimator = 'lstdq'
-
-    sim_options_keys = ['xstd', 'ustd', 'vstd', 'wstd', 'nt', 'nr', 'group_option', 'qfun_estimator']
-    sim_options_values = [xstd, ustd, vstd, wstd, nt, nr, group_option, qfun_estimator]
-    sim_options = dict(zip(sim_options_keys, sim_options_values))
-    return sim_options
-
-
-def compare_qfun():
+def compare_qfun(problem_data, sim_options, K, L):
     """Compare single Q-function evaluation in cases of known and unknown dynamics"""
-    Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, problem_data_known=False, K=K0, L=L0, sim_options=sim_options)
+    Qxx, Quu, Qvv, Qux, Qvx, Qvu = qfun(problem_data, problem_data_known=False, K=K, L=L, sim_options=sim_options)
     Q_parts = [Qxx, Quu, Qvv, Qux, Qvx, Qvu]
 
     # Calculate error
     Q_part_strings = ['Qxx', 'Quu', 'Qvv', 'Qux', 'Qvx', 'Qvu']
 
-    Q_parts_true = qfun(problem_data, problem_data_known=True, K=K0, L=L0)
+    Q_parts_true = qfun(problem_data, problem_data_known=True, K=K, L=L)
     for Q_part, Q_part_true, Q_part_string in zip(Q_parts, Q_parts_true, Q_part_strings):
         print(Q_part_string)
         print('true')
@@ -553,73 +508,4 @@ def compare_qfun():
         print('diff')
         print(Q_part-Q_part_true)
         print('\n')
-
-    QuvQvvinv = solveb(Qvu.T, Qvv)
-    QvuQuuinv = solveb(Qvu, Quu)
-    K = -la.solve(Quu-QuvQvvinv.dot(Qvu), Qux-QuvQvvinv.dot(Qvx))
-    L = -la.solve(Qvv-QvuQuuinv.dot(Qvu.T), Qvx-QvuQuuinv.dot(Qux))
     return
-
-
-if __name__ == "__main__":
-    seed = 1
-    npr.seed(seed)
-
-    # problem_data_id = 1581199445 # 5-state random system
-    problem_data_id = 1581378883 # 2-state example system
-    # problem_data_id = 3 # 3-state example system
-    # problem_data_id = 2 # 2-state example system
-    problem_data = get_problem_data(problem_type='load', problem_data_id=problem_data_id)
-    problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
-    A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
-    n, m, p = [M.shape[1] for M in [A, B, C]]
-    q, r, s = [M.shape[0] for M in [Ai, Bj, Ck]]
-
-    # Initial gains
-    K0, L0 = get_initial_gains(problem_data, initial_gain_method='zero')
-
-    # Simulation options
-    sim_options = get_sim_options()
-    num_iterations = 20
-
-    # Policy iteration
-    problem_data_known = False
-    P_pi, K_pi, L_pi, H_pi, P_history_pi, K_history_pi, L_history_pi, c_history_pi, H_history_pi = policy_iteration(problem_data, problem_data_known, K0, L0, sim_options, num_iterations)
-    verify_gare(problem_data, P_pi, algo_str='Policy iteration')
-
-    # Value iteration
-    # Start value iteration at the same initial P as from policy iteration
-    P0 = gdlyap(problem_data, K0, L0)
-    P_vi, K_vi, L_vi, P_history_vi, c_history_vi = value_iteration(problem_data, P0, num_iterations)
-    verify_gare(problem_data, P_vi, algo_str='Value iteration')
-
-    # Plotting
-    plt.close('all')
-    t_history = np.arange(num_iterations)+1
-
-    # Cost-to-go matrix
-    fig, ax = plt.subplots(ncols=2)
-    plt.suptitle('Value matrix (P)')
-    ax[0].imshow(P_pi)
-    ax[1].imshow(P_vi)
-    ax[0].set_title('Policy iteration')
-    ax[1].set_title('Value iteration')
-    # Specific stuff for Ben's monitor
-    fig.canvas.manager.window.setGeometry(3600, 600, 800, 600)
-    fig.canvas.manager.window.showMaximized()
-    plt.show()
-
-    # Cost over iterations
-    fig, ax = plt.subplots()
-    ax.plot(t_history, c_history_pi)
-    ax.plot(t_history, c_history_vi)
-    plt.legend(['Policy iteration', 'Value iteration'])
-    plt.xlabel('Iteration')
-    plt.ylabel('Cost')
-    if num_iterations <= 20:
-        plt.xticks(np.arange(num_iterations)+1)
-
-    # Specific stuff for Ben's monitor
-    fig.canvas.manager.window.setGeometry(3600, 600, 800, 600)
-    fig.canvas.manager.window.showMaximized()
-    plt.show()

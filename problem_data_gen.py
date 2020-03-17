@@ -1,9 +1,8 @@
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as la
+from scipy import signal
 
-import sys
-sys.path.insert(0,'../utility')
 from matrixmath import specrad, vec
 
 
@@ -196,103 +195,6 @@ def gen_double_spring_mass():
     # Full dynamics, true system
     # Model parameters
     # Spring constants are for 'negative springs' i.e. spring < 0 is a restoring force
-    spring1 = +1.50
-    spring2 = -0.02
-    spring3 = -0.02
-
-    # Masses
-    mass1 = 1.0
-    mass2 = 0.2
-
-    # Friction constants are for 'negative friction' i.e. friction < 0 is a retarding force
-    friction1 = -0.02
-    friction2 = -0.02
-
-    # Actuator strength
-    b = 1.0
-
-    # Discretization time duration
-    dt = 0.10
-
-    # Continuous time dynamics
-    Ac = np.array([[0, 1, 0, 0],
-                   [(spring1+spring3)/mass1, friction1/mass1, spring1/mass1, 0],
-                   [0, 0, 0, 1],
-                   [spring2/mass2, 0, (spring2+spring3)/mass2, friction2/mass2]])
-    Bc = np.array([[0], [b], [0], [0]])
-
-    # Discrete time dynamics under forward Euler discretization
-    A = np.eye(4) + Ac*dt
-    B = Bc*dt
-    C = np.zeros([4, 1])
-
-    Ai = np.zeros([1, 4, 4])
-    Bj = np.zeros([1, 4, 1])
-    Ck = np.zeros([1, 4, 1])
-
-    varAi = np.array([0])
-    varBj = np.array([0])
-    varCk = np.array([0])
-
-    Q = np.eye(4)
-    R = np.eye(1)
-    S = 10*np.eye(1)
-
-    problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
-    problem_data_values = [A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S]
-    problem_data_full = dict(zip(problem_data_keys, problem_data_values))
-
-
-    # Reduced dynamics, nominal system + uncertainty
-
-    # Model parameters
-    # Use same spring constants, mass2, discretization time as in true system
-    # Use mis-specified parameters
-    spring1 = (2/3)*spring1 # smaller than true spring1
-    b = 1.2*b # larger than true actuator strength b
-
-    # Continuous time dynamics
-    Ac = np.array([[0, 1,],
-                   [(spring1+spring3)/mass1, friction1/mass1]])
-    Bc = np.array([[0], [b]])
-    Cc = np.array([[0], [1]])
-
-    # Discrete time dynamics under forward Euler discretization
-    A = np.eye(2) + Ac*dt
-    B = Bc*dt
-    C = Cc*dt
-
-    Ai = np.array([[[0, 0],
-                    [1, 0]]])*dt
-    Bj = np.array([[[0], [1]]])*dt
-    Ck = np.array([[[0], [1]]])*dt
-
-    varAi = np.array([3.0])
-    varBj = np.array([1.0])
-    varCk = np.array([0.0])
-
-    Q = np.eye(2)
-    R = np.eye(1)
-    S = 2.1*np.eye(1)
-
-    problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
-    problem_data_values = [A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S]
-    problem_data_reduced = dict(zip(problem_data_keys, problem_data_values))
-
-    return problem_data_full, problem_data_reduced
-
-
-def gen_double_spring_mass2():
-    """
-    Generate problem data for a general double spring-mass system.
-    Return problem data for:
-    1) The full system which has perfect dynamics i.e. the true system
-    2) A reduced system which ignores dynamics of the second mass and underestimates the first mass
-    """
-
-    # Full dynamics, true system
-    # Model parameters
-    # Spring constants are for 'negative springs' i.e. spring < 0 is a restoring force
     spring1 = +1.00
     spring2 = -1.00
     spring3 = -0.10
@@ -380,7 +282,7 @@ def gen_double_spring_mass2():
 
 
 def example_system_erdos_renyi(n, m, p, diffusion_constant=1.0, leakiness_constant=0.2, time_constant=0.1,
-                               leaky=True, seed=None, dirname_out='.'):
+                               leaky=True, seed=None):
     npr.seed(seed)
     # ER probability
     # crp = 7.0
@@ -423,7 +325,7 @@ def example_system_erdos_renyi(n, m, p, diffusion_constant=1.0, leakiness_consta
         Ac = Ac - Fc
 
     # Plot
-    visualize_graph_ring(adjacency, n, dirname_out)
+    visualize_graph_ring(adjacency, n)
 
     # Forward Euler discretization
     A = np.eye(n) + Ac*time_constant
@@ -465,7 +367,7 @@ def example_system_erdos_renyi(n, m, p, diffusion_constant=1.0, leakiness_consta
     return problem_data
 
 
-def visualize_graph_ring(adj, n, dirname_parent):
+def visualize_graph_ring(adj, n):
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
 

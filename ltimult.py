@@ -4,8 +4,6 @@ import numpy.linalg as la
 import warnings
 from warnings import warn
 
-import sys
-sys.path.insert(0,'../utility')
 from matrixmath import kron, vec, is_pos_def, specrad
 
 

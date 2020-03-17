@@ -4,7 +4,7 @@ import numpy.random as npr
 import scipy.linalg as sla
 import matplotlib.pyplot as plt
 
-from ltimult_lqm import gdlyap
+from ltimult import gdlyap
 
 import sys
 sys.path.insert(0,'../utility')
