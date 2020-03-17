@@ -1,2 +1,2 @@
-# policy_iteration_lqm_games
- Policy iteration for linear quadratic games with multiplicative noise
+# policy-iteration-slq-games
+ Policy iteration for linear quadratic games with stochastic parameters
