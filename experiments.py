@@ -2,7 +2,6 @@ import numpy as np
 import numpy.linalg as la
 import numpy.random as npr
 import matplotlib.pyplot as plt
-import control as ctrl
 import copy
 
 from problem_data_gen import gen_double_spring_mass, example_system_erdos_renyi
@@ -32,7 +31,7 @@ def get_problem_data(problem_type, problem_data_id=None, seed=None):
     return problem_data
 
 
-def model_check(A, B, Q, R, K, op = True, model_type=None):
+def model_check(A, B, Q, R, K, op=True, model_type=None):
     """Check stability of system (A,B) with costs Q, R under the feedback gain K """
     # A, B, C = sample_ABCrand(problem_data_true)
     Qbar = Q + mdot(K.T, R, K)
@@ -51,7 +50,27 @@ def model_check(A, B, Q, R, K, op = True, model_type=None):
     return ret
 
 
-def mtpl(A, B, K_pi, Kn_pi, Km_pi, Q, R, init = 1, multiplier_accuracy = 10**(-8), multiplier_bound = 10**(5), iteration_steps = 10**10):
+def ctrb(A, B):
+    """Controllabilty matrix
+    Parameters
+    ----------
+    A, B: array_like
+        Dynamics and input matrix of the system
+    Returns
+    -------
+    C: matrix
+        Controllability matrix
+    Examples
+    --------
+    >>> C = ctrb(A, B)
+    """
+
+    n = np.shape(A)[0]
+    C = np.hstack([B] + [np.dot(la.matrix_power(A, i), B) for i in range(1, n)])
+    return C
+
+
+def mtpl(A, B, K_pi, Kn_pi, Km_pi, Q, R, init=1, multiplier_accuracy=10**(-8), multiplier_bound=10**(5), iteration_steps=10**10):
     """ Calculate a multiplying/scaling factor on the dynamics such that the system is not stabilized by gains from nominal game or LQR with multiplicative noise
      and only by gains from game with multiplicative noise """
     At_base = copy.deepcopy(A)
@@ -62,7 +81,7 @@ def mtpl(A, B, K_pi, Kn_pi, Km_pi, Q, R, init = 1, multiplier_accuracy = 10**(-8
     m = B.shape[1]
 
     #standard controllability check
-    if np.linalg.matrix_rank(ctrl.ctrb(At_base,Bt)) < len(At_base):
+    if la.matrix_rank(ctrb(At_base, Bt)) < len(At_base):
         print("Given A,B matrix pair for the true system is not controllable.")
         return 0
 
@@ -109,7 +128,6 @@ def mtpl(A, B, K_pi, Kn_pi, Km_pi, Q, R, init = 1, multiplier_accuracy = 10**(-8
     elif check_gains ==3:
         print("\tFailed check. Multiplier out of threshold or too many iterations.")
     return mpl
-
 
 
 def model_based_robust_stabilization_experiment():
@@ -242,8 +260,6 @@ def model_based_robust_stabilization_experiment():
     # if num_iterations <= 20:
     #     plt.xticks(np.arange(num_iterations)+1)
     # plt.show()
-
-
 
 
 def model_free_network_slq_game_experiment():
