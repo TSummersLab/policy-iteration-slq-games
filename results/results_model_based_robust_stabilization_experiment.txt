@@ -1,0 +1,7 @@
+method       |  specrad  |   cost   |  gains
+open-loop       1.570        inf      [[0.0 0.0 0.0 0.0]]
+cert equiv      1.031        inf      [[-1.6 -1.5 0.0 0.0]]
+noise           1.021        inf      [[-1.7 -1.6 0.0 0.0]]
+game            1.018        inf      [[-1.8 -1.7 0.0 0.0]]
+noise + game    0.994      31074      [[-2.3 -2.1 0.0 0.0]]
+optimal         0.965       3019      [[-2.6 -2.0 -2.1 2.9]]

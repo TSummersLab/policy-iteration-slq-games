@@ -3,7 +3,7 @@ import numpy.random as npr
 import numpy.linalg as la
 from scipy import signal
 
-from matrixmath import specrad, vec
+from matrixmath import specrad
 
 
 def gen_ex2_ABC():
@@ -105,7 +105,7 @@ def gen_inv_pendulum():
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     problem_data_values = [A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S]
     problem_data = dict(zip(problem_data_keys, problem_data_values))
-    # print(problem_data)
+    # print(data_files)
     return problem_data
 
 
@@ -180,14 +180,14 @@ def gen_inv_pendulum_cart(): #Refer http://www2.ensc.sfu.ca/people/faculty/saif/
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     problem_data_values = [A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S]
     problem_data = dict(zip(problem_data_keys, problem_data_values))
-    # print(problem_data)
+    # print(data_files)
     return problem_data
 
 
 def gen_double_spring_mass():
     """
-    Generate problem data for a general double spring-mass system.
-    Return problem data for:
+    Generate problem data_files for a general double spring-mass system.
+    Return problem data_files for:
     1) The full system which has perfect dynamics i.e. the true system
     2) A reduced system which ignores dynamics of the second mass and underestimates the first mass
     """
@@ -282,7 +282,7 @@ def gen_double_spring_mass():
 
 
 def example_system_erdos_renyi(n, m, p, diffusion_constant=1.0, leakiness_constant=0.2, time_constant=0.1,
-                               leaky=True, seed=None):
+                               leaky=True, seed=None, show_graph=False):
     npr.seed(seed)
     # ER probability
     # crp = 7.0
@@ -325,7 +325,8 @@ def example_system_erdos_renyi(n, m, p, diffusion_constant=1.0, leakiness_consta
         Ac = Ac - Fc
 
     # Plot
-    visualize_graph_ring(adjacency, n)
+    if show_graph:
+        visualize_graph_ring(adjacency, n)
 
     # Forward Euler discretization
     A = np.eye(n) + Ac*time_constant
@@ -370,7 +371,6 @@ def example_system_erdos_renyi(n, m, p, diffusion_constant=1.0, leakiness_consta
 def visualize_graph_ring(adj, n):
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
-
 
     fig, ax = plt.subplots(figsize=(4, 4))
 

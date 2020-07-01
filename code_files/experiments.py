@@ -3,11 +3,12 @@ import numpy.linalg as la
 import numpy.random as npr
 import matplotlib.pyplot as plt
 import copy
+import os
 
 from problem_data_gen import gen_double_spring_mass, example_system_erdos_renyi
 from policy_iteration import policy_iteration, value_iteration, get_initial_gains, verify_gare
 from ltimult import gdlyap
-from matrixmath import mdot, specrad, dlyap, dare_gain, is_pos_def, kron, vec
+from matrixmath import mdot, specrad, dlyap, dare_gain, is_pos_def
 
 
 def set_numpy_decimal_places(places, width=0):
@@ -16,10 +17,10 @@ def set_numpy_decimal_places(places, width=0):
 
 
 def get_problem_data(problem_type, problem_data_id=None, seed=None):
-    """Get problem data"""
+    """Get problem data_files"""
     from time import time
-    from data_io import save_problem_data, load_problem_data
-    from problem_data_gen import gen_rand_problem_data
+    from code_files.data_io import save_problem_data, load_problem_data
+    from code_files.problem_data_gen import gen_rand_problem_data
 
     if problem_type == 'load':
         problem_data = load_problem_data(problem_data_id)
@@ -144,7 +145,7 @@ def model_based_robust_stabilization_experiment():
 
     # Synthesize controllers using various uncertainty modeling terms
 
-    # Modify problem data
+    # Modify problem data_files
     # LQR w/ game adversary
     # Setting varAi, varBj, varCk = 0 => no multiplicative noise on the game
     problem_data_model_n = copy.deepcopy(problem_data)
@@ -216,9 +217,14 @@ def model_based_robust_stabilization_experiment():
 
     set_numpy_decimal_places(1)
 
-    print('method       |  specrad  |   cost   |  gains')
-    for control_method_string, sr, cost, K in zip(control_method_strings, specrad_list, cost_list, K_list):
-        print('%s  %.3f %8s    %s' % (control_method_string, sr, '%10.0f' % cost, K))
+    output_text_filename = 'results_model_based_robust_stabilization_experiment.txt'
+    output_text_path = os.path.join('..', 'results', output_text_filename)
+    with open(output_text_path, 'w') as f:
+        header_str = 'method       |  specrad  |   cost   |  gains'
+        print(header_str, file=f)
+        for control_method_string, sr, cost, K in zip(control_method_strings, specrad_list, cost_list, K_list):
+            line_str = '%s  %.3f %8s      %s' % (control_method_string, sr, '%10.0f' % cost, K)
+            print(line_str, file=f)
 
 
     # # Plot closed-loop response of true and nominal models
@@ -262,14 +268,12 @@ def model_based_robust_stabilization_experiment():
     # plt.show()
 
 
-def model_free_network_slq_game_experiment():
-    seed = 2
+def model_free_network_slq_game_experiment(seed=2):
     npr.seed(seed)
 
     problem_data = example_system_erdos_renyi(n=3, m=2, p=2, seed=seed)
     # from data_io import load_problem_data
-    # problem_data = load_problem_data(4)
-
+    # data_files = load_problem_data(4)
 
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
@@ -316,25 +320,32 @@ def model_free_network_slq_game_experiment():
         all_data_list.append(policy_iteration(problem_data, problem_data_known, K0, L0, sim_options, num_iterations))
 
     def norm_history_plotter(ax, M_history, M_history_list, ylabel_str):
+        # Plot the history of the error norm from the single trial in the model-based case
         ax.plot(la.norm(M_history-M_history[-1], ord=2, axis=(1, 2)))
+
+        # Plot the history of the error norm from each of the individual trials in the model-free case
         for i in range(num_trials):
             ax.plot(la.norm(M_history_list[i]-M_history[-1], ord=2, axis=(1, 2)), color='k', alpha=0.5)
-        ax.set_ylabel(ylabel_str, rotation=0)
+        ax.set_ylabel(ylabel_str, rotation=0, labelpad=10)
 
-    fig, ax = plt.subplots(nrows=4)
+    fig, ax = plt.subplots(nrows=4, figsize=(6, 8))
     data_idx_list = [4, 5, 6, 8]
     ylabel_list = ['P', 'K', 'L', 'H']
     for i in range(4):
         j = data_idx_list[i]
         norm_history_plotter(ax[i], all_data[j], [all_data_list[i][j] for i in range(num_trials)], ylabel_list[i])
+        ax[i].set_yscale('log')
+        ax[i].legend(['Model-based', 'Model-free'])
     # plt.tight_layout()
     ax[0].set_title('Relative norm of error vs iteration')
     plt.xlabel('Iteration')
     plt.show()
+    figure_out_path = os.path.join('..', 'results', 'results_model_free_network_slq_game_experiment.png')
+    plt.savefig(figure_out_path, dpi=300)
 
 
-def generic_experiment():
-    seed = 1
+def generic_experiment(seed=1):
+    # Model-based or model-free solution to the linear-quadratic game with stochastic parameters for generic systems
     npr.seed(seed)
 
     # problem_data_id = 1581199445 # 5-state random system
@@ -411,18 +422,10 @@ def generic_experiment():
 
 
 if __name__ == "__main__":
-
-    # Choose an experiment to run
-
     # Model-based robust stabilization of the double-mass-spring system described in the paper
     # "Policy iteration for linear quadratic games with stochastic parameters"
     model_based_robust_stabilization_experiment()
 
-    # # Model-free solution to the linear-quadratic game with stochastic parameters of a diffusion network
-    # model_free_network_slq_game_experiment()
-
-    # # Model-based or model-free solution to the linear-quadratic game with stochastic parameters for generic systems
-    # generic_experiment()
-
-
-    # Paste / type code here while testing new experiments
+    # Model-free solution to the linear-quadratic game with stochastic parameters of a diffusion network
+    # (not reported explicitly in the paper)
+    model_free_network_slq_game_experiment()

@@ -3,7 +3,7 @@ import numpy.linalg as la
 import numpy.random as npr
 
 from ltimult import gdlyap
-from matrixmath import mdot, specrad, solveb, dlyap, dare_gain, is_pos_def, vec, svec, svec2, smat, smat2, sympart, kron
+from matrixmath import mdot, specrad, solveb, dare_gain, is_pos_def, svec2, smat2, kron
 
 
 def groupdot(A, x):
@@ -235,7 +235,7 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
         qfun_estimator = sim_options['qfun_estimator']
 
         if qfun_estimator == 'direct':
-            # Simulation data collection
+            # Simulation data_files collection
             x0, u0, v0, Qval = rollout(problem_data, K, L, sim_options)
 
             # Dimensions
@@ -266,10 +266,10 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
             Qxx, Quu, Qvv, Qux, Qvx, Qvu = Q_parts
 
         elif qfun_estimator == 'lsadp':
-            # Simulation data collection
+            # Simulation data_files collection
             x_hist, u_hist, v_hist, c_hist = rollout(problem_data, K, L, sim_options)
 
-            # Form the data matrices
+            # Form the data_files matrices
             ns = nr*(nt-1)
             nz = int(((n+m+p+1)*(n+m+p))/2)
             mu_hist = np.zeros([nr, nt, nz])
@@ -307,10 +307,10 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
 
 
         elif qfun_estimator == 'lstdq':
-            # Simulation data collection
+            # Simulation data_files collection
             x_hist, u_hist, v_hist, c_hist = rollout(problem_data, K, L, sim_options)
 
-            # Form the data matrices
+            # Form the data_files matrices
             nz = int(((n+m+p+1)*(n+m+p))/2)
             mu_hist = np.zeros([nr, nt, nz])
             nu_hist = np.zeros([nr, nt, nz])
@@ -377,10 +377,10 @@ def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None,
 
     print('Policy iteration')
     for i in range(num_iterations):
-        if print_iterates:
-            print('iteration %3d / %3d' % (i+1, num_iterations))
-            print(K)
-            print(L)
+        # if print_iterates:
+        #     print('iteration %3d / %3d' % (i+1, num_iterations))
+        #     print(K)
+        #     print(L)
 
         # Record history
         K_history[i] = K
@@ -403,6 +403,9 @@ def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None,
         P_history[i] = P
         H_history[i] = H
         c_history[i] = np.trace(P)
+        if print_iterates:
+            print('iteration %3d / %3d' % (i+1, num_iterations))
+            print(P)
 
     print('')
     return P, K, L, H, P_history, K_history, L_history, c_history, H_history

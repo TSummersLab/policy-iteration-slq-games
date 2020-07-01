@@ -7,8 +7,8 @@ def filenamer(problem_data_id):
     return filename
 
 def pather(problem_data_id):
-    location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
-    problem_data_directory = 'problem_data'
+    location = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), '..'))
+    problem_data_directory = 'data_files'
     filename = filenamer(problem_data_id)
     path = os.path.join(location, problem_data_directory, filename)
     return path
