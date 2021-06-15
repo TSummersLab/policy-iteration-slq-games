@@ -1,9 +1,10 @@
 # policy-iteration-slq-games
- Policy iteration for linear quadratic games with stochastic parameters
+## Policy iteration for linear quadratic games with stochastic parameters
 
 The code in this repository implements model-based and model-free algorithms of policy iteration for linear quadratic games with stochastic parameters (SLQ games) and ideas from our paper:
 
-"Policy Iteration for Linear Quadratic Games with Stochastic Parameters" (accepted IEEE L-CSS)
+"Policy Iteration for Linear Quadratic Games with Stochastic Parameters"
+* [IEEE Xplore (IEEE L-CSS, presented @ CDC 2020)](https://ieeexplore.ieee.org/document/9115001)
 
 
 ## Dependencies
