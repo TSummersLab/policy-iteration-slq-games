@@ -132,7 +132,7 @@ def rollout(problem_data, K, L, sim_options):
         # Sample initial states, defender control inputs, and attacker control inputs
         x0 = xstd*npr.randn(nr, n)
         u_explore_hist = ustd*npr.randn(nr, nt, m)
-        v_explore_hist =  vstd*npr.randn(nr, nt, p)
+        v_explore_hist = vstd*npr.randn(nr, nt, p)
 
         x_hist = np.zeros([nr, nt, n])
         u_hist = np.zeros([nr, nt, m])
@@ -305,7 +305,6 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
             Qvx = H[n+m:, 0:n]
             Qvu = H[n+m:, n:n+m]
 
-
         elif qfun_estimator == 'lstdq':
             # Simulation data_files collection
             x_hist, u_hist, v_hist, c_hist = rollout(problem_data, K, L, sim_options)
@@ -344,7 +343,6 @@ def qfun(problem_data, problem_data_known=None, P=None, K=None, L=None, sim_opti
             Qvx = H[n+m:, 0:n]
             Qvu = H[n+m:, n:n+m]
 
-
     if output_format == 'list':
         outputs = Qxx, Quu, Qvv, Qux, Qvx, Qvu
     elif output_format == 'matrix':
@@ -377,11 +375,6 @@ def policy_iteration(problem_data, problem_data_known, K0, L0, sim_options=None,
 
     print('Policy iteration')
     for i in range(num_iterations):
-        # if print_iterates:
-        #     print('iteration %3d / %3d' % (i+1, num_iterations))
-        #     print(K)
-        #     print(L)
-
         # Record history
         K_history[i] = K
         L_history[i] = L
@@ -477,7 +470,6 @@ def get_initial_gains(problem_data, initial_gain_method=None):
     problem_data_keys = ['A', 'B', 'C', 'Ai', 'Bj', 'Ck', 'varAi', 'varBj', 'varCk', 'Q', 'R', 'S']
     A, B, C, Ai, Bj, Ck, varAi, varBj, varCk, Q, R, S = [problem_data[key] for key in problem_data_keys]
     n, m, p = [M.shape[1] for M in [A, B, C]]
-
 
     if initial_gain_method is None:
         initial_gain_method = 'zero'
